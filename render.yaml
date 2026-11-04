@@ -1,0 +1,20 @@
+# Render Blueprint: New > Blueprint > pick this repo. Runs the Node backend AND serves the game page.
+services:
+  - type: web
+    name: veil-ascent
+    runtime: node
+    plan: starter            # persistent disks need a paid plan; on free, accounts reset on redeploy (remove the disk block and DB var)
+    buildCommand: npm install
+    startCommand: npm start
+    healthCheckPath: /api/health
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: JWT_SECRET
+        generateValue: true
+      - key: DB
+        value: /data/data.db
+    disk:
+      name: veil-data
+      mountPath: /data
+      sizeGB: 1
