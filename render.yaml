@@ -1,13 +1,15 @@
-# Render Blueprint: New > Blueprint > pick this repo. Runs the Node backend AND serves the game page.
+# PAID variant (always-on + persistent disk so accounts survive). To use: replace render.yaml with this file.
 services:
   - type: web
     name: veil-ascent
     runtime: node
-    plan: starter            # persistent disks need a paid plan; on free, accounts reset on redeploy (remove the disk block and DB var)
+    plan: starter            # always-on; disk keeps accounts and ratings
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
     envVars:
+      - key: NODE_VERSION
+        value: 22.12.0   # better-sqlite3 has no build for the newest Node yet
       - key: NODE_ENV
         value: production
       - key: JWT_SECRET
