@@ -5,6 +5,12 @@ if(process.env.NODE_ENV=='production'&&!process.env.JWT_SECRET){console.error('J
 const S=process.env.JWT_SECRET||'dev-secret-change-me',db=new Database(process.env.DB||'data.db');
 db.exec(`create table if not exists users(id integer primary key,name text unique,hash text,created integer,played integer default 0,wins integer default 0);
 create table if not exists games(id integer primary key,ts integer,size integer,players text,winner text,log text)`);
+for(const c of['elo integer default 1000','rated integer default 0'])try{db.exec('alter table users add column '+c)}catch{}
+db.exec("create table if not exists meta(k text primary key,v text);create table if not exists hall(season text,name text,elo integer)");
+function season(){const now=new Date().toISOString().slice(0,7),c=db.prepare("select v from meta where k='season'").get();
+ if(!c)db.prepare("insert into meta values('season',?)").run(now);
+ else if(c.v!=now){db.prepare('insert into hall select ?,name,elo from users where rated>0 order by elo desc limit 3').run(c.v);db.exec('update users set elo=1000,rated=0');db.prepare("update meta set v=? where k='season'").run(now)}return now}
+season();
 const app=express();app.set('trust proxy',1);app.disable('x-powered-by');
 app.use((q,s,n)=>{s.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'});n()});
 const hits=new Map();setInterval(()=>hits.clear(),36e5);
@@ -18,10 +24,10 @@ for(const k of['register','login'])app.post('/api/'+k,lim,(q,s)=>{const{name,pas
   const r=db.prepare('insert into users(name,hash,created) values(?,?,?)').run(name,bcrypt.hashSync(password,10),Date.now());u={id:r.lastInsertRowid,name}}
  else if(!u||!bcrypt.compareSync(password,u.hash))return s.status(401).json({error:'Wrong credentials'});
  s.json({token:tok(u),name:u.name})});
-const auth=(q,s,n)=>{try{q.u=jwt.verify((q.headers.authorization||'').slice(7),S);n()}catch{s.sendStatus(401)}};
-app.get('/api/me',auth,(q,s)=>s.json({...db.prepare('select name,created,played,wins from users where id=?').get(q.u.id),
+const auth=(q,s,n)=>{try{q.u=jwt.verify((q.headers.authorization||'').slice(7),S);season();n()}catch{s.sendStatus(401)}};
+app.get('/api/me',auth,(q,s)=>s.json({...db.prepare('select name,created,played,wins,elo,rated from users where id=?').get(q.u.id),
  games:db.prepare('select ts,size,winner,players from games where players like ? order by id desc limit 6').all('%"'+q.u.name+'"%')}));
-app.get('/api/top',auth,(q,s)=>s.json(db.prepare('select name,wins,played from users order by wins desc,played asc limit 8').all()));
+app.get('/api/top',auth,(q,s)=>s.json({season:season(),rows:db.prepare('select name,elo,wins from users where rated>0 order by elo desc limit 8').all(),champs:db.prepare('select season,name,elo from hall where season=(select max(season) from hall) order by elo desc').all()}));
 const EM=['😈','🤔','👁','🔥','😂','🙏'];
 app.get('/api/health',(q,s)=>s.json({ok:true}));
 app.use('/api',(q,s)=>s.status(404).json({error:'Not found'}));
@@ -29,20 +35,29 @@ app.use((e,q,s,n)=>{console.error(e);s.status(e.status==400?400:500).json({error
 const server=http.createServer(app),wss=new WebSocketServer({server,maxPayload:2048}),rooms=new Map();
 const send=(w,o)=>w&&w.readyState==1&&w.send(JSON.stringify(o));
 const mk=(size,pub)=>{let c;do c=Math.random().toString(36).slice(2,6).toUpperCase();while(rooms.has(c));const r={c,size,pub,pl:[],t:[]};rooms.set(c,r);return r};
-const lobby=r=>r.pl.forEach(p=>send(p.ws,{t:'lobby',c:r.c,n:r.pl.length,size:r.size}));
-const start=r=>{r.g=newGame(r.pl.map(p=>({name:p.name,bot:!!p.bot})));tick(r)};
+const FILL=+process.env.FILL_MS||2e4;
+const lobby=r=>r.pl.forEach(p=>send(p.ws,{t:'lobby',c:r.c,n:r.pl.length,size:r.size,fb:r.fbAt?Math.max(0,r.fbAt-Date.now()):0}));
+const start=r=>{clearTimeout(r.fb);r.fbAt=0;r.g=newGame(r.pl.map(p=>({name:p.name,bot:!!p.bot})));tick(r)};
 const mv=(r,i,m)=>{if(i>=0&&step(r.g,i,m||{}))tick(r)};
 function tick(r){r.t.forEach(clearTimeout);r.t=[];const g=r.g;
- r.pl.forEach((p,i)=>send(p.ws,{t:'state',s:view(g,i)}));
+ r.pl.forEach((p,i)=>send(p.ws,{t:'state',s:view(g,i),tm:r.tut?9e4:25000}));
  if(g.phase=='over')return done(r);
- waiting(g).forEach(i=>{const b=g.players[i].bot;r.t.push(setTimeout(()=>mv(r,i,b?bot(g,i):safe(g)),b?900+Math.random()*1000:25000))})}
-function done(r){const g=r.g,w=g.players[g.win].name;
+ waiting(g).forEach(i=>{const b=g.players[i].bot;r.t.push(setTimeout(()=>mv(r,i,b?bot(g,i,r.lv):safe(g)),b?900+Math.random()*1000:r.tut?9e4:25000))})}
+// Elo for PvP games between distinct real accounts (practice/tutorial and bot seats are unrated)
+function rate(r){const g=r.g,w=r.pl[g.win],hs=r.pl.filter(p=>p.uid);
+ if(!w||!w.uid||hs.length<2||hs.length<r.pl.length||new Set(hs.map(p=>p.uid)).size<hs.length)return;
+ const R0={},d={};hs.forEach(p=>{R0[p.uid]=db.prepare('select elo from users where id=?').get(p.uid).elo;d[p.uid]=0});const K=32/(hs.length-1);
+ hs.filter(p=>p.uid!=w.uid).forEach(l=>{const x=K*(1-1/(1+10**((R0[l.uid]-R0[w.uid])/400)));d[w.uid]+=x;d[l.uid]-=x});
+ hs.forEach(p=>{const n=Math.max(100,Math.round(R0[p.uid]+d[p.uid]));db.prepare('update users set elo=?,rated=rated+1 where id=?').run(n,p.uid);send(p.ws,{t:'rating',d:n-R0[p.uid],elo:n})})}
+function done(r){season();rate(r);const g=r.g,w=g.players[g.win].name;
  db.prepare('insert into games(ts,size,players,winner,log) values(?,?,?,?,?)').run(Date.now(),r.size,JSON.stringify(g.players.map(p=>p.name)),w,JSON.stringify(g.log));
  r.pl.forEach(p=>p.uid&&db.prepare('update users set played=played+1,wins=wins+? where id=?').run(p.name==w?1:0,p.uid));rooms.delete(r.c)}
 wss.on('connection',ws=>{let u,room,le=0;
- const enter=r=>{room=r;r.pl.push({name:u.name,uid:u.id,ws});r.pl.length==r.size?start(r):lobby(r)};
+ const enter=r=>{room=r;r.pl.push({name:u.name,uid:u.id,ws});if(r.pl.length==r.size)return start(r);
+  if(r.pub&&!r.fb){r.fbAt=Date.now()+FILL;r.fb=setTimeout(()=>{if(!r.g&&r.pl.length){for(let i=r.pl.length;i<r.size;i++)r.pl.push({name:BN[i]||'Ghost',bot:1});start(r)}},FILL)}
+  lobby(r)};
  const bye=away=>{if(!room)return;const r=room,i=r.pl.findIndex(p=>p.ws==ws);room=null;if(i<0)return;
-  if(!r.g){r.pl.splice(i,1);lobby(r);if(!r.pl.length)rooms.delete(r.c)}
+  if(!r.g){r.pl.splice(i,1);lobby(r);if(!r.pl.length){clearTimeout(r.fb);rooms.delete(r.c)}}
   else if(r.g.phase!='over'){const p=r.pl[i];p.ws=null;r.g.players[i].bot=true;if(away===true)p.away=true;else p.bot=1;
    if(!r.pl.some(x=>x.ws)){r.t.forEach(clearTimeout);r.t=[];if(r.pl.some(x=>x.away))r.gc=setTimeout(()=>rooms.delete(r.c),9e4);else rooms.delete(r.c)}else tick(r)}};
  ws.on('message',d=>{let m;try{m=JSON.parse(d)}catch{return}
@@ -52,7 +67,7 @@ wss.on('connection',ws=>{let u,room,le=0;
   if(!u)return;
   if(m.t=='play'&&!room){const size=m.size==4?4:2;let r;
    if(m.mode=='quick')r=[...rooms.values()].find(x=>!x.g&&x.pub&&x.size==size);
-   if(!r){r=mk(size,m.mode=='quick');if(m.mode=='practice')for(let i=1;i<size;i++)r.pl.push({name:BN[i],bot:1})}
+   if(!r){r=mk(size,m.mode=='quick');r.lv=['easy','hard'].includes(m.lv)?m.lv:'normal';r.tut=!!m.tut&&m.mode=='practice';if(m.mode=='practice')for(let i=1;i<size;i++)r.pl.push({name:BN[i],bot:1})}
    enter(r)}
   else if(m.t=='join'&&!room){const r=rooms.get(String(m.c).toUpperCase());
    if(!r||r.g||r.pl.length>=r.size)send(ws,{t:'err',e:'Room unavailable'});else enter(r)}
