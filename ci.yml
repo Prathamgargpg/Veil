@@ -9,3 +9,4 @@ jobs:
         with: { node-version: 20 }
       - run: npm ci || npm install
       - run: node --check server.js && node --check game.js
+      - run: npm test

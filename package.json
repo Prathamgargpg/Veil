@@ -1,2 +1,20 @@
-{"name":"veil-ascent","version":"1.0.0","type":"module","scripts":{"start":"node server.js"},"engines":{"node":">=18"},
-"dependencies":{"bcryptjs":"^2.4.3","better-sqlite3":"^11.3.0","express":"^4.19.2","jsonwebtoken":"^9.0.2","ws":"^8.18.0"}}
+{
+ "name": "veil-ascent",
+ "version": "1.0.0",
+ "type": "module",
+ "scripts": {
+  "start": "node server.js",
+  "test": "node --test",
+  "sim": "node scripts/sim.js"
+ },
+ "engines": {
+  "node": ">=18 <25"
+ },
+ "dependencies": {
+  "bcryptjs": "^2.4.3",
+  "better-sqlite3": "^11.3.0",
+  "express": "^4.19.2",
+  "jsonwebtoken": "^9.0.2",
+  "ws": "^8.18.0"
+ }
+}

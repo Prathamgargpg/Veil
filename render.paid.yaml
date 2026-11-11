@@ -1,11 +1,9 @@
-# Render Blueprint (FREE plan): New > Blueprint > pick this repo.
-# Free plan limits: sleeps after 15 min idle (first visit then takes ~1 min), and local files are wiped on every
-# spin-down/redeploy, so accounts and ratings RESET. For persistent data use render.paid.yaml instead.
+# PAID variant (always-on + persistent disk so accounts survive). To use: replace render.yaml with this file.
 services:
   - type: web
     name: veil-ascent
     runtime: node
-    plan: free
+    plan: starter            # always-on; disk keeps accounts and ratings
     buildCommand: npm install
     startCommand: npm start
     healthCheckPath: /api/health
@@ -16,3 +14,9 @@ services:
         value: production
       - key: JWT_SECRET
         generateValue: true
+      - key: DB
+        value: /data/data.db
+    disk:
+      name: veil-data
+      mountPath: /data
+      sizeGB: 1
