@@ -1,0 +1,25 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import{newGame,step,waiting,bot,view}from '../game.js';
+const mk=(h0,h1,a0=0)=>{const g=newGame([{name:'A'},{name:'B'}]);g.players[0].hand=[...h0];g.players[1].hand=[...h1];g.players[0].asc=a0;return g};
+test('setup: 2 hidden Sigils each, deck sized by player count',()=>{const a=newGame([{name:'A'},{name:'B'}]),b=newGame(Array.from({length:4},(_,i)=>({name:'P'+i})));
+ assert.ok(a.players.every(p=>p.hand.length==2));assert.equal(a.deck.length,12-4);assert.equal(b.deck.length,16-8)});
+test('tithe gives +1 and passes the turn',()=>{const g=mk(['Seer','Seer'],['Seer','Seer']);step(g,0,{a:'tithe'});assert.equal(g.players[0].asc,1);assert.equal(g.turn,1)});
+test('unchallenged Broker gives +4',()=>{const g=mk(['Seer','Seer'],['Seer','Seer']);step(g,0,{a:'broker'});step(g,1,{a:'pass'});assert.equal(g.players[0].asc,4);assert.equal(g.turn,1)});
+test('challenged Broker bluff: claimer loses a Sigil, no gain',()=>{const g=mk(['Seer','Seer'],['Seer','Seer']);step(g,0,{a:'broker'});step(g,1,{a:'challenge'});
+ assert.equal(g.phase,'lose');step(g,0,{c:0});assert.equal(g.players[0].hand.length,1);assert.equal(g.players[0].asc,0);assert.equal(g.turn,1)});
+test('challenged truthful Broker: challenger loses a Sigil, claimer still gains',()=>{const g=mk(['Broker','Seer'],['Seer','Seer']);step(g,0,{a:'broker'});step(g,1,{a:'challenge'});step(g,1,{c:0});
+ assert.equal(g.players[1].hand.length,1);assert.equal(g.players[0].hand.length,2);assert.equal(g.players[0].asc,4)});
+test('Blade: costs 2, target loses a Sigil when accepted',()=>{const g=mk(['Blade','Seer'],['Seer','Seer'],2);step(g,0,{a:'blade',target:1});assert.equal(g.players[0].asc,0);
+ step(g,1,{a:'pass'});assert.equal(g.phase,'block');step(g,1,{a:'accept'});step(g,1,{c:0});assert.equal(g.players[1].hand.length,1)});
+test('Blade needs 2 Ascent',()=>{const g=mk(['Blade','Seer'],['Seer','Seer'],1);step(g,0,{a:'blade',target:1});assert.equal(g.phase,'act');assert.equal(g.players[0].asc,1)});
+test('true Warden block beats a challenging attacker',()=>{const g=mk(['Blade','Seer'],['Warden','Seer'],2);step(g,0,{a:'blade',target:1});step(g,1,{a:'pass'});step(g,1,{a:'block'});step(g,0,{a:'challenge'});step(g,0,{c:1});
+ assert.equal(g.players[1].hand.length,2);assert.equal(g.players[0].hand.length,1)});
+test('bluffed Warden: blocker loses a Sigil and still takes the Blade',()=>{const g=mk(['Blade','Seer'],['Seer','Seer'],2);step(g,0,{a:'blade',target:1});step(g,1,{a:'pass'});step(g,1,{a:'block'});step(g,0,{a:'challenge'});step(g,1,{c:0});step(g,1,{c:0});
+ assert.equal(g.players[1].hand.length,0);assert.equal(g.phase,'over');assert.equal(g.win,0)});
+test('reaching 10 Ascent wins',()=>{const g=mk(['Seer','Seer'],['Seer','Seer'],9);step(g,0,{a:'tithe'});assert.equal(g.phase,'over');assert.equal(g.win,0)});
+test('only the player whose decision it is can move',()=>{const g=mk(['Seer','Seer'],['Seer','Seer']);assert.equal(step(g,1,{a:'tithe'}),false)});
+test('view never leaks other hands',()=>{const g=mk(['Blade','Seer'],['Warden','Seer']);const v=view(g,0);assert.ok(v.players[0].hand);assert.equal(v.players[1].hand,undefined)});
+test('400 bot-only games (all levels, 2P and 4P) always finish legally',()=>{const L=['easy','normal','hard'];
+ for(let n=0;n<400;n++){const size=n%2?4:2,g=newGame(Array.from({length:size},(_,i)=>({name:'P'+i,bot:true})));let k=0;
+  while(g.phase!='over'&&k++<3000){const w=waiting(g);assert.ok(w.length,'someone must be able to act');assert.ok(step(g,w[0],bot(g,w[0],L[n%3])));g.players.forEach(p=>assert.ok(p.hand.length<=2&&p.asc>=0))}
+  assert.equal(g.phase,'over','game '+n+' finished')}});
