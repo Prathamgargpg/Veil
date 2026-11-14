@@ -111,7 +111,7 @@ const burst=(x,y,n)=>{if(RM)return;for(let i=0;i<n;i++){const a=Math.random()*6.
 async function api(p,b){let r;try{r=await fetch('/api/'+p,{method:b?'POST':'GET',headers:{'content-type':'application/json',authorization:'Bearer '+T},body:b&&JSON.stringify(b)})}catch{throw 'Cannot reach the server'}
  const j=await r.json().catch(()=>null);if(!r.ok)throw(j&&j.error)||(r.status==401?'Session expired. Please log in again.':`Server error (${r.status}). Is the Node backend running at this address?`);return j||{}}
 async function au(k){try{const j=await api(k,{name:$('#n').value,password:$('#p').value});T=localStorage.tok=j.token;conn()}catch(e){$('#er').textContent=e}}
-$('#p').onkeydown=e=>e.key=='Enter'&&au('login');
+$('#p').onkeydown=e=>{if(e.key=='Enter')au('login')};
 const send=o=>ws.send(JSON.stringify(o)),mv=m=>send({t:'move',m}),pl=(mode,size)=>{last=[mode,size];TUT=false;send({t:'play',mode,size,lv:LV})},tut=()=>{TUT=true;last=['practice',2];send({t:'play',mode:'practice',size:2,lv:'easy',tut:1})},sl=l=>{LV=localStorage.lv=l;document.querySelectorAll('#lv .tb').forEach(b=>b.classList.toggle('on',b.dataset.l==l))},leave=()=>{send({t:'leave'});home()},again=()=>{send({t:'leave'});TUT?tut():pl(...last)};
 function conn(){ws=new WebSocket((location.protocol=='https:'?'wss://':'ws://')+location.host);ws.onopen=()=>{$('#rc').hidden=true;send({t:'auth',token:T})};
  ws.onmessage=e=>{const m=JSON.parse(e.data);if(m.t=='ok'&&!m.rejoin){home();if(INV){send({t:'join',c:INV});INV=null;history.replaceState(null,'',location.pathname)}}
