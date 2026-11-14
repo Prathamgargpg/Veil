@@ -15,21 +15,24 @@ season();
 const BAD=/fuck|shit|bitch|nazi|rape|porn|admin|moderator|support|^veil$/i; // minimal list: extend before a public launch
 const app=express();app.set('trust proxy',1);app.disable('x-powered-by');
 app.use((q,s,n)=>{s.set({'X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer'});n()});
-const hits=new Map();setInterval(()=>hits.clear(),36e5);
-const lim=(q,s,n)=>{const t=Date.now(),a=(hits.get(q.ip)||[]).filter(x=>t-x<3e5);a.push(t);hits.set(q.ip,a);a.length>12?s.status(429).json({error:'Too many attempts. Wait a few minutes.'}):n()};
+// Rate limits: failed logins per ip+name (a shared proxy address cannot lock everyone out) and a loose cap on total sign-ups.
+const fails=new Map();let regs=[];setInterval(()=>fails.clear(),36e5);const recent=a=>(a||[]).filter(x=>Date.now()-x<3e5);
 app.use(express.json({limit:'2kb'}));app.use(express.static('public'));
 // Forgiving layout: if page files were uploaded to the repo root instead of public/, serve just those pages (never the whole root).
 const find=f=>existsSync('public/'+f)?'public/'+f:f;
 for(const f of['index.html','privacy.html','terms.html'])if(!existsSync('public/'+f)&&existsSync(f)){console.warn('WARNING: public/'+f+' missing, serving ./'+f+'. Move it into the public/ folder.');app.get(f=='index.html'?['/','/index.html']:'/'+f,(q,s)=>s.sendFile(path.resolve(f)))}
 if(!existsSync('public/index.html')&&!existsSync('index.html'))app.get('/',(q,s)=>s.status(500).send('VEIL: index.html not found. It must be at public/index.html in your GitHub repo.'));
 const tok=u=>jwt.sign({id:u.id,name:u.name},S,{expiresIn:'7d'});
-for(const k of['register','login'])app.post('/api/'+k,lim,(q,s)=>{const{name,password}=q.body||{};
- if(!/^\w{3,16}$/.test(name||'')||(password||'').length<6)return s.status(400).json({error:'Name 3-16 letters/digits, password 6+'});
+for(const k of['register','login'])app.post('/api/'+k,(q,s)=>{const{name,password}=q.body||{};
+ const done=(c,o)=>{console.log(k,JSON.stringify(String(name).slice(0,16)),'->',c);s.status(c).json(o)},key=q.ip+'|'+String(name).toLowerCase();
+ if(!/^\w{3,16}$/.test(name||'')||(password||'').length<6)return done(400,{error:'Name 3-16 letters/digits, password 6+'});
  let u=db.prepare('select * from users where name=?').get(name);
- if(k=='register'){if(BAD.test(name))return s.status(400).json({error:'That name is not allowed'});if(u)return s.status(409).json({error:'Name taken'});
-  const r=db.prepare('insert into users(name,hash,created) values(?,?,?)').run(name,bcrypt.hashSync(password,10),Date.now());u={id:r.lastInsertRowid,name}}
- else if(!u||!bcrypt.compareSync(password,u.hash))return s.status(401).json({error:'Wrong credentials'});
- s.json({token:tok(u),name:u.name})});
+ if(k=='login'&&recent(fails.get(key)).length>=8)return done(429,{error:'Too many failed attempts. Wait a few minutes.'});
+ if(k=='register'){regs=regs.filter(x=>Date.now()-x<6e5);if(regs.length>=60)return done(429,{error:'Too many sign-ups right now. Try again in a few minutes.'});
+  if(BAD.test(name))return done(400,{error:'That name is not allowed'});if(u)return done(409,{error:'Name taken'});
+  const r=db.prepare('insert into users(name,hash,created) values(?,?,?)').run(name,bcrypt.hashSync(password,10),Date.now());u={id:r.lastInsertRowid,name};regs.push(Date.now())}
+ else if(!u||!bcrypt.compareSync(password,u.hash)){fails.set(key,[...recent(fails.get(key)),Date.now()]);return done(401,{error:'Wrong credentials'})}
+ done(200,{token:tok(u),name:u.name})});
 const auth=(q,s,n)=>{try{q.u=jwt.verify((q.headers.authorization||'').slice(7),S);if(!db.prepare('select 1 from users where id=?').get(q.u.id))return s.sendStatus(401);season();n()}catch{s.sendStatus(401)}};
 app.get('/api/me',auth,(q,s)=>s.json({...db.prepare('select name,created,played,wins,elo,rated from users where id=?').get(q.u.id),
  games:db.prepare('select ts,size,winner,players from games where players like ? order by id desc limit 6').all('%"'+q.u.name+'"%')}));
@@ -73,7 +76,8 @@ wss.on('connection',ws=>{let u,room,le=0;
   else if(r.g.phase!='over'){const p=r.pl[i];p.ws=null;r.g.players[i].bot=true;if(away===true)p.away=true;else p.bot=1;
    if(!r.pl.some(x=>x.ws)){r.t.forEach(clearTimeout);r.t=[];if(r.pl.some(x=>x.away))r.gc=setTimeout(()=>rooms.delete(r.c),9e4);else rooms.delete(r.c)}else tick(r)}};
  ws.on('message',d=>{let m;try{m=JSON.parse(d)}catch{return}
-  if(m.t=='auth'){try{u=jwt.verify(m.token,S);if(!db.prepare('select 1 from users where id=?').get(u.id))throw 0}catch{send(ws,{t:'err',e:'auth'});return}
+  if(m.t=='auth'){try{u=jwt.verify(m.token,S);if(!db.prepare('select 1 from users where id=?').get(u.id))throw 0}catch{console.log('ws auth failed');send(ws,{t:'err',e:'auth'});return}
+   console.log('ws auth ok',u.name);
    const r=[...rooms.values()].find(x=>x.g&&x.g.phase!='over'&&x.pl.some(p=>p.uid==u.id&&p.away)),i=r?r.pl.findIndex(p=>p.uid==u.id&&p.away):-1;
    if(i>=0){room=r;const p=r.pl[i];p.ws=ws;p.away=false;r.g.players[i].bot=false;clearTimeout(r.gc);send(ws,{t:'ok',rejoin:true});tick(r)}else send(ws,{t:'ok'});return}
   if(!u)return;
