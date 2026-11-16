@@ -75,3 +75,5 @@ const G={
 <li>When you have only 1 card left, every challenge can end your game. Only claim what you can risk.</li>
 <li>A red screen and a heartbeat sound mean you have 8 seconds left.</li>
 <li>Use the emotes to confuse your rivals. 😈</li></ul>`};
+// Also load the extra look and feel (public/ui.css and public/ui.js). Remove these lines to go back to the plain style.
+(()=>{const l=document.createElement('link');l.rel='stylesheet';l.href='/ui.css';document.head.append(l);const s=document.createElement('script');s.src='/ui.js';document.body.append(s)})();
