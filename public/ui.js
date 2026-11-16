@@ -27,3 +27,12 @@
   if(s.phase=='react2')return `${P[p.target].name} says they have the Warden. Press Challenge if you think they lie. If they lied, they lose a card and the Blade still hits them.`;
   return 'You must lose a card. Keep the one you trust most. The lost card is shown to everyone.'};
 })();
+// Plain-English game log: the server's wording is rewritten on screen only.
+(()=>{
+ const L=[[/^The Veil lifts\.$/,'The game begins.'],[/^(\w+) tithes \+1\.$/,'$1 takes 1 Ascent (Tithe).'],[/^(\w+) claims Blade against (\w+)\.$/,'$1 says they have the Blade and aims it at $2.'],[/^(\w+) claims (\w+)\.$/,'$1 says they have the $2.'],
+  [/^(\w+) challenges (\w+)'s (\w+)!$/,'$1 challenges $2! $2 must show the $3.'],[/^(\w+) revealed \u2014 the doubter pays\.$/,'$1 shown. It was true, so the challenger loses a card.'],[/^(\w+) was bluffing!$/,'$1 was lying!'],
+  [/^(\w+) loses (\w+)\.$/,'$1 loses the $2 card.'],[/^(\w+) brokers \+(\d+) Ascent\.$/,'$1 gets $2 Ascent.'],[/^(\w+) consults the Seer\.$/,'$1 swaps a card.'],[/^(\w+) may block\.$/,'$1 can block the Blade.'],
+  [/^The blow is blocked\.$/,'The Blade is blocked.'],[/^(\w+) ascends the pyramid\.$/,'$1 reaches the top and wins.']];
+ const fixLog=()=>document.querySelectorAll('#log div').forEach(e=>{const t=e.textContent;let n=t;for(const[r,v]of L)if(r.test(t)){n=t.replace(r,v);break}if(n!==t)e.textContent=n});
+ new MutationObserver(fixLog).observe(document.getElementById('log'),{childList:true,subtree:true});
+})();
